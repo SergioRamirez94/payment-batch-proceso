@@ -1,0 +1,88 @@
+name: transactions batch Api
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+env:
+  ECR_REPOSITORY_STG: transactions-batch-stg
+  ECR_REPOSITORY: transactions-batch-prod
+  ECS_CLUSTER_STG: stg-cluster-payment-batch-processor
+  ECS_CLUSTER: prod-cluster-payment-batch-processor
+  ECS_SERVICE: payment-batch-processor-service
+  AWS_REGION: us-east-1
+ 
+jobs:
+  deploy-staging:
+    name: Deploy Staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+          fetch-depth: 0
+
+    - name: Configure AWS Credentials whit iam role
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          #role-to-assume : ${{ secrets.AWS_ROLE_ARN }}
+          role-skip-session-tagging: true
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        REPOSITORY: ${{ env.ECR_REPOSITORY_STG}}
+        IMAGE_TAG: "latest"
+      run: |
+        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+        docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+    - name: Deploy to ECS
+      run: 
+        aws --region ${{ env.AWS_REGION }} ecs update-service --cluster  ${{env.ECS_CLUSTER_STG}} --service ${{env.ECS_SERVICE}} --force-new-deployment
+    
+  deploy-prod:
+    name: Deploy Prod
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+          fetch-depth: 0
+
+    - name: Configure AWS Credentials whit iam role
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume : ${{ secrets.AWS_ROLE_ARN }}
+          role-skip-session-tagging: true
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        REPOSITORY: ${{ env.ECR_REPOSITORY}}
+        IMAGE_TAG: "latest"
+      run: |
+        docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+        docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+    - name: Deploy to ECS
+      run: 
+        aws --region ${{ env.AWS_REGION }} ecs update-service --cluster  ${{env.ECS_CLUSTER}} --service ${{env.ECS_SERVICE}} --force-new-deployment
