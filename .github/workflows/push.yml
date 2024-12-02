@@ -9,9 +9,9 @@ on:
 env:
   ECR_REPOSITORY_STG: transactions-batch-stg
   ECR_REPOSITORY: transactions-batch-prod
-  ECS_CLUSTER_STG: stg-cluster-payment-batch-processor
-  ECS_CLUSTER: prod-cluster-payment-batch-processor
-  ECS_SERVICE: payment-batch-processor-service
+  ECS_CLUSTER_STG: stg-cluster-payment-batch-procesor
+  ECS_CLUSTER: prod-cluster-payment-batch-procesor
+  ECS_SERVICE: payment-batch-procesor-service
   AWS_REGION: us-east-1
  
 jobs:
