@@ -183,7 +183,7 @@ def process_message(message):
         has_failures = "FAILED" in df["status_transaction"].values
         response_message = {
             "batch_id": batch_id,
-            "status": "FAILED" if has_failures else "SUCCESSFUL",
+            "status": "INCOMPLETE" if has_failures else "COMPLETE",
             "s3_file_path": output_key
         }
         send_message_to_response_queue(SQS_RESPONSE_BATCH_TRANSACTION, response_message)
