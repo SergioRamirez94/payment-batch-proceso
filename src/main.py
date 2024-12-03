@@ -145,12 +145,9 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str):
         logging.error(f"Error dispersing funds: {str(e)}")
         raise
 
-def send_message_to_response_queue(queue_name: str, message_body: Dict[str, Any]):
+def send_message_to_response_queue(QueueUrl: str, message_body: Dict[str, Any]):
     try:
-        print(queue_name)
-        response = sqs_client.get_queue_url(QueueName=queue_name)
-        queue_url = response['QueueUrl']
-        sqs_client.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message_body))
+        sqs_client.send_message(QueueUrl=QueueUrl, MessageBody=json.dumps(message_body))
         logging.info("Message sent to response queue.")
     except Exception as e:
         logging.error(f"Error sending message to response queue: {str(e)}")
