@@ -181,10 +181,15 @@ def process_message(message):
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
         has_failures = "FAILED" in df["status_transaction"].values
+        total_ammount_transfer = df[df["status_transaction"]=='SUCCESSFUL']['amount'].sum()
+        total_accounts_transfer = len(df[df["status_transaction"]=='SUCCESSFUL'])
         response_message = {
             "batch_id": batch_id,
             "status": "INCOMPLETE" if has_failures else "COMPLETE",
-            "s3_file_path": output_key
+            "total_ammount_transfer":total_ammount_transfer,
+            "s3_file_path": output_key,
+            "total_accounts_transfer":total_accounts_transfer
+            
         }
         send_message_to_response_queue(SQS_RESPONSE_BATCH_TRANSACTION, response_message)
         return True
