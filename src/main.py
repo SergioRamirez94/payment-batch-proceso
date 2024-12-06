@@ -117,19 +117,20 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str):
             for index, row in group.iterrows():
                 wallet_id = row['wallet_id']
                 amount = row['amount']
-                account_id_to = row['account_id']
                 sql_transaction += (
                     f"UPDATE wallets SET balance = balance + {amount} WHERE id = '{wallet_id}';\n"
                 )
+                
                 sql_transaction += (
                     f"""INSERT INTO {TABLE_TRANSACTIONS} (
-                            id, user_id, account_id_to, wallet_id_to, amount, 
-                            currency, account_id_from, wallet_id_from, 
-                            timestamp_transaction, transaction_type
+                            transaction_id, user_id, transaction_type, transaction_group, 
+                            source_wallet_id, destination_wallet_id, currency, amount, 
+                            fee_fixed, fee_variable_percent, exchange_rate, 
+                            related_transaction_id, status, timestamp_create
                         ) VALUES (
-                            '{uuid.uuid4()}', '{user_id}', '{account_id_to}', '{wallet_id}', 
-                            {amount}, '{currency}', '{account_id}', 
-                            '{wallet_id_from}', NOW(), 'BONO'
+                            '{uuid.uuid4()}', '{user_id}', 'bono', 'bono', 
+                            '{wallet_id_from}', '{wallet_id}', '{currency}', {amount}, 
+                            0.0, 0.0, NULL, '{batch_id}', 'completed', NOW()
                         );\n"""
                 )
             sql_transaction += "COMMIT;"
