@@ -7,6 +7,7 @@ from io import BytesIO
 import os
 import uuid
 import json
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,6 +44,11 @@ DICT_ACCOUNT = {
 s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
 
+def custom_serializer(obj):
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()  # Convierte a tipos nativos
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 def get_wallet_intregration(
     client, integration: str, currency: str
 ) -> Optional[Dict[str, Any]]:
@@ -58,8 +64,7 @@ def get_wallet_intregration(
     """
     account_integration_id = DICT_ACCOUNT[integration]
     response = client.sqlQuery(
-        f"SELECT id FROM {TABLE_WALLETS} WHERE account_id = '{account_integration_id}' AND currency = '{currency}'",
-        integration,
+        f"SELECT id FROM {TABLE_WALLETS} WHERE account_id = '{account_integration_id}' AND currency = '{currency}'"
     )
     return response[0] if response else None
 
@@ -110,11 +115,6 @@ def block_amount(client, wallet_id, amount, batch_id):
     query = f"""
         BEGIN TRANSACTION;
         UPDATE wallets SET balance = balance - {amount} WHERE id = '{wallet_id}';
-        INSERT INTO {PENDING_TRANSACTION} (
-            id, transaction_id, wallet_id, amount, status, timestamp_blocked
-        ) VALUES (
-            '{uuid.uuid4()}', '{batch_id}', '{wallet_id}', {amount}, 'pending', NOW()
-        );
         COMMIT;
     """
     client.sqlExec(query)
@@ -147,6 +147,8 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
         block_amount(client, wallet_id_from, total_fee, batch_id)
         groups = split_dataframe(df, group_size=100)
         integration_wallet_id = get_wallet_intregration(client, "tikin", currency)
+        if integration_wallet_id is None:
+            raise ValueError("Integration account no exist.")
         integration_wallet_id =  integration_wallet_id[0]
         for group in groups:
             sql_transaction = "BEGIN TRANSACTION;\n"
@@ -166,7 +168,7 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
                             fee_fixed, fee_variable_percent, exchange_rate, 
                             related_transaction_id, status, timestamp_create
                         ) VALUES (
-                            '{uuid.uuid4()}', '{user_id}', {process}, {process}, 
+                            '{uuid.uuid4()}', '{user_id}', 'transfer', '{process}', 
                             '{wallet_id_from}', '{wallet_id}', '{currency}', {amount}, 
                             0.0, {percentage_fee*100}, NULL, '{batch_id}', 'completed', NOW()
                         );\n"""
@@ -178,7 +180,7 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
                             fee_fixed, fee_variable_percent, exchange_rate, 
                             related_transaction_id, status, timestamp_create
                         ) VALUES (
-                            '{uuid.uuid4()}', '{user_id}', 'fee_transfer', {process}, 
+                            '{uuid.uuid4()}', '{user_id}', 'fee_transfer', '{process}', 
                             '{wallet_id_from}', '{integration_wallet_id}', '{currency}', {fee}, 
                             0.0, 0.0, NULL, '{batch_id}', 'completed', NOW()
                         );\n"""
@@ -198,7 +200,7 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
 
 def send_message_to_response_queue(QueueUrl: str, message_body: Dict[str, Any]):
     try:
-        sqs_client.send_message(QueueUrl=QueueUrl, MessageBody=json.dumps(message_body))
+        sqs_client.send_message(QueueUrl=QueueUrl, MessageBody=json.dumps(message_body, default=custom_serializer))
         logging.info("Message sent to response queue.")
     except Exception as e:
         logging.error(f"Error sending message to response queue: {str(e)}")
