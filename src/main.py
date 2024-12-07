@@ -119,10 +119,11 @@ def block_amount(client, wallet_id, amount, batch_id):
     """
     client.sqlExec(query)
 
-def rollback_failed_transactions(client, df, wallet_id_from):
+def rollback_failed_transactions(client, df, wallet_id_from, percentage_fee):
     failed_transactions = df[df['status_transaction'] == "FAILED"]
     if not failed_transactions.empty:
         total_refund = failed_transactions['amount'].sum()
+        total_refund = percentage_fee*total_refund
         query = f"UPDATE wallets SET balance = balance + {total_refund} WHERE id = '{wallet_id_from}';"
         try:
             client.sqlExec(query)
@@ -147,7 +148,6 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
         groups = split_dataframe(df, group_size=100)
         integration_wallet_id = get_wallet_intregration(client, "tikin", currency)
         integration_wallet_id =  integration_wallet_id[0]
-        client
         for group in groups:
             sql_transaction = "BEGIN TRANSACTION;\n"
             for index, row in group.iterrows():
@@ -190,7 +190,7 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
             except Exception as e:
                 logging.error(f"Error executing SQL transaction: {str(e)}")
                 df.loc[group.index, "status_transaction"] = "FAILED"
-        rollback_failed_transactions(client, df, wallet_id_from)
+        rollback_failed_transactions(client, df, wallet_id_from, percentage_fee)
         return df
     except Exception as e:
         logging.error(f"Error dispersing funds: {str(e)}")
