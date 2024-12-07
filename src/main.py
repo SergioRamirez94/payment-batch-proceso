@@ -1,7 +1,7 @@
 import boto3
 import logging
 import pandas as pd
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from immudb.client import ImmudbClient
 from io import BytesIO
 import os
@@ -31,8 +31,38 @@ DICT_DATABASE = {
 
 DICT_CLIENTS = {}
 
+ID_ACCOUNT_BEU = os.getenv("ID_ACCOUNT_BEU")
+ID_ACCOUNT_TIKIN = os.getenv("ID_ACCOUNT_TIKIN")
+
+DICT_ACCOUNT = {
+    "beu": ID_ACCOUNT_BEU,
+    "tikin": ID_ACCOUNT_TIKIN,
+}
+
+
 s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
+
+def get_wallet_intregration(
+    client, integration: str, currency: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves the wallet information for the integration account based on the given currency.
+
+    Args:
+        integration (str): The integration type (e.g., "beu" or "tikin").
+        currency (str): The currency of the wallet.
+
+    Returns:
+        Optional[Dict[str, Any]]: The wallet details or None if not found.
+    """
+    account_integration_id = DICT_ACCOUNT[integration]
+    response = client.sqlQuery(
+        f"SELECT id FROM {TABLE_WALLETS} WHERE account_id = '{account_integration_id}' AND currency = '{currency}'",
+        integration,
+    )
+    return response[0] if response else None
+
 
 def get_or_reconnect_client(integration: str) -> ImmudbClient:
     if integration not in DICT_DATABASE:
@@ -101,7 +131,7 @@ def rollback_failed_transactions(client, df, wallet_id_from):
             logging.error(f"Error refunding funds: {str(e)}")
             raise
 
-def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str):
+def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, amount_percentage, user_percentage, process):
     try:
         client = get_or_reconnect_client('tikin')
         response = check_amount_account(client, account_id, currency)
@@ -110,15 +140,23 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str):
         wallet_id_from, balance = response
         if balance < df['amount'].sum():
             raise ValueError("Insufficient funds.")
-        block_amount(client, wallet_id_from, df['amount'].sum(), batch_id)
+        total_amont = df['amount'].sum()
+        percentage_fee = (user_percentage + amount_percentage)/100
+        total_fee = total_amont*percentage_fee
+        block_amount(client, wallet_id_from, total_fee, batch_id)
         groups = split_dataframe(df, group_size=100)
+        integration_wallet_id = get_wallet_intregration(client, "tikin", currency)
+        integration_wallet_id =  integration_wallet_id[0]
+        client
         for group in groups:
             sql_transaction = "BEGIN TRANSACTION;\n"
             for index, row in group.iterrows():
                 wallet_id = row['wallet_id']
                 amount = row['amount']
+                fee = amount*percentage_fee
                 sql_transaction += (
                     f"UPDATE wallets SET balance = balance + {amount} WHERE id = '{wallet_id}';\n"
+                    f"UPDATE wallets SET balance = balance + {fee} WHERE id = '{integration_wallet_id}';\n"
                 )
                 
                 sql_transaction += (
@@ -128,8 +166,20 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str):
                             fee_fixed, fee_variable_percent, exchange_rate, 
                             related_transaction_id, status, timestamp_create
                         ) VALUES (
-                            '{uuid.uuid4()}', '{user_id}', 'bono', 'bono', 
+                            '{uuid.uuid4()}', '{user_id}', {process}, {process}, 
                             '{wallet_id_from}', '{wallet_id}', '{currency}', {amount}, 
+                            0.0, {percentage_fee*100}, NULL, '{batch_id}', 'completed', NOW()
+                        );\n"""
+                )
+                sql_transaction += (
+                    f"""INSERT INTO {TABLE_TRANSACTIONS} (
+                            transaction_id, user_id, transaction_type, transaction_group, 
+                            source_wallet_id, destination_wallet_id, currency, amount, 
+                            fee_fixed, fee_variable_percent, exchange_rate, 
+                            related_transaction_id, status, timestamp_create
+                        ) VALUES (
+                            '{uuid.uuid4()}', '{user_id}', 'fee_transfer', {process}, 
+                            '{wallet_id_from}', '{integration_wallet_id}', '{currency}', {fee}, 
                             0.0, 0.0, NULL, '{batch_id}', 'completed', NOW()
                         );\n"""
                 )
@@ -173,12 +223,15 @@ def process_message(message):
     currency = body.get("currency")
     user_id = body.get("user_id")
     batch_id = body.get("batch_id")
+    amount_percentage = body.get("amount_percentage")
+    user_percentage = body.get("user_percentage")
+    process = body.get("user_percentage")
     if not account_id or not s3_key:
         logging.error("Invalid message in queue. Skipping...")
         return False
     try:
         df = download_excel_from_s3(s3_key)
-        df = disperse_funds(batch_id, account_id, df, currency, user_id)
+        df = disperse_funds(batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
         has_failures = "FAILED" in df["status_transaction"].values
@@ -190,7 +243,6 @@ def process_message(message):
             "total_amount_transfer":total_amount_transfer,
             "s3_file_path": output_key,
             "total_accounts_transfer":total_accounts_transfer
-            
         }
         send_message_to_response_queue(SQS_RESPONSE_BATCH_TRANSACTION, response_message)
         return True
