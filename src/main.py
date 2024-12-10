@@ -143,13 +143,14 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
             df_transactions = df[df['status_transaction'] =='FAILED']
         else:
             df_transactions = df.copy()
-        if balance < df['amount'].sum():
+        total_amont = df_transactions['amount'].sum()
+        if balance < total_amont:
             raise ValueError("Insufficient funds.")
-        total_amont = df['amount'].sum()
+        
         percentage_fee = (user_percentage + amount_percentage)/100
         total_fee = total_amont*percentage_fee
         block_amount(client, wallet_id_from, total_fee, batch_id)
-        groups = split_dataframe(df, group_size=100)
+        groups = split_dataframe(df_transactions, group_size=100)
         integration_wallet_id = get_wallet_intregration(client, "tikin", currency)
         if integration_wallet_id is None:
             raise ValueError("Integration account no exist.")
