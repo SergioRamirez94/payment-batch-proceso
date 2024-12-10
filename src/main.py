@@ -139,6 +139,10 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
         if response is None:
             raise ValueError("Account or wallet not found.")
         wallet_id_from, balance = response
+        if 'status_transaction' in df.columns:
+            df_transactions = df[df['status_transaction'] =='FAILED']
+        else:
+            df_transactions = df.copy()
         if balance < df['amount'].sum():
             raise ValueError("Insufficient funds.")
         total_amont = df['amount'].sum()
