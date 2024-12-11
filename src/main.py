@@ -8,6 +8,8 @@ import os
 import uuid
 import json
 import numpy as np
+from .database.database import execute_sql, query_executer
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,12 +27,6 @@ TABLE_WALLETS = os.getenv("TABLE_WALLETS")
 TABLE_TRANSACTIONS = os.getenv("TABLE_TRANSACTIONS")
 PENDING_TRANSACTION = os.getenv("PENDING_TRANSACTION")
 
-DICT_DATABASE = {
-    "beu": DATABASE_BEU,
-    "tikin": DATABASE_TIKIN,
-}
-
-DICT_CLIENTS = {}
 
 ID_ACCOUNT_BEU = os.getenv("ID_ACCOUNT_BEU")
 ID_ACCOUNT_TIKIN = os.getenv("ID_ACCOUNT_TIKIN")
@@ -50,7 +46,7 @@ def custom_serializer(obj):
     raise TypeError(f"Type {type(obj)} not serializable")
 
 def get_wallet_intregration(
-    client, integration: str, currency: str
+    integration: str, currency: str
 ) -> Optional[Dict[str, Any]]:
     """
     Retrieves the wallet information for the integration account based on the given currency.
@@ -63,32 +59,11 @@ def get_wallet_intregration(
         Optional[Dict[str, Any]]: The wallet details or None if not found.
     """
     account_integration_id = DICT_ACCOUNT[integration]
-    response = client.sqlQuery(
-        f"SELECT id FROM {TABLE_WALLETS} WHERE account_id = '{account_integration_id}' AND currency = '{currency}'"
+    response = query_executer(
+        f"SELECT id FROM {TABLE_WALLETS} WHERE account_id = '{account_integration_id}' AND currency = '{currency}'",integration
     )
     return response[0] if response else None
 
-
-def get_or_reconnect_client(integration: str) -> ImmudbClient:
-    if integration not in DICT_DATABASE:
-        raise ValueError(f"Invalid integration: {integration}")
-    client = DICT_CLIENTS.get(integration)
-    if not client:
-        client = ImmudbClient(IMMUDB_HOST)
-        client.login(IMMUDB_USER, IMMUDB_PASSWORD)
-        client.useDatabase(DICT_DATABASE[integration])
-        DICT_CLIENTS[integration] = client
-        return client
-    try:
-        client.healthCheck()
-        return client
-    except Exception:
-        logging.warning(f"Reconnecting to Immudb for integration: {integration}")
-        client = ImmudbClient(IMMUDB_HOST)
-        client.login(IMMUDB_USER, IMMUDB_PASSWORD)
-        client.useDatabase(DICT_DATABASE[integration])
-        DICT_CLIENTS[integration] = client
-        return client
 
 def download_excel_from_s3(s3_key: str) -> pd.DataFrame:
     try:
@@ -106,52 +81,51 @@ def split_dataframe(df, group_size=100):
     groups = [df.iloc[i:i + group_size] for i in range(0, len(df), group_size)]
     return groups
 
-def check_amount_account(client: ImmudbClient, account_id, currency):
+def check_amount_account(integration, account_id, currency):
     query = f"SELECT id, balance FROM {TABLE_WALLETS} WHERE account_id = '{account_id}' AND currency = '{currency}'"
-    response = client.sqlQuery(query)
+    response = query_executer(query, integration)
     return response[0] if response else None
 
-def block_amount(client, wallet_id, amount, batch_id):
+def block_amount(integration, wallet_id, amount, batch_id):
     query = f"""
         BEGIN TRANSACTION;
         UPDATE wallets SET balance = balance - {amount} WHERE id = '{wallet_id}';
         COMMIT;
     """
-    client.sqlExec(query)
+    execute_sql(query, integration)
 
-def rollback_failed_transactions(client, df, wallet_id_from, percentage_fee):
+def rollback_failed_transactions(integration, df, wallet_id_from, percentage_fee):
     failed_transactions = df[df['status_transaction'] == "FAILED"]
     if not failed_transactions.empty:
         total_refund = failed_transactions['amount'].sum()
         total_refund = percentage_fee*total_refund
         query = f"UPDATE wallets SET balance = balance + {total_refund} WHERE id = '{wallet_id_from}';"
         try:
-            client.sqlExec(query)
+            execute_sql(query, integration)
             logging.info(f"Refunded {total_refund} to wallet {wallet_id_from}.")
         except Exception as e:
             logging.error(f"Error refunding funds: {str(e)}")
             raise
 
-def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, amount_percentage, user_percentage, process):
+def disperse_funds(integration, batch_id, account_id: str, df, currency: str, user_id: str, amount_percentage, user_percentage, process):
     try:
-        client = get_or_reconnect_client('tikin')
-        response = check_amount_account(client, account_id, currency)
+        df_transactions = df[df['account_id'].notna()].copy()
+        response = check_amount_account(integration, account_id, currency)
         if response is None:
             raise ValueError("Account or wallet not found.")
         wallet_id_from, balance = response
-        if 'status_transaction' in df.columns:
-            df_transactions = df[df['status_transaction'] =='FAILED']
-        else:
-            df_transactions = df.copy()
+        if 'status_transaction' in df_transactions.columns:
+            df_transactions = df_transactions[df_transactions['status_transaction'] =='FAILED']
+
         total_amont = df_transactions['amount'].sum()
         if balance < total_amont:
             raise ValueError("Insufficient funds.")
         
         percentage_fee = (user_percentage + amount_percentage)/100
         total_fee = total_amont*percentage_fee
-        block_amount(client, wallet_id_from, total_fee, batch_id)
+        block_amount(integration, wallet_id_from, total_fee, batch_id)
         groups = split_dataframe(df_transactions, group_size=100)
-        integration_wallet_id = get_wallet_intregration(client, "tikin", currency)
+        integration_wallet_id = get_wallet_intregration(integration, "tikin", currency)
         if integration_wallet_id is None:
             raise ValueError("Integration account no exist.")
         integration_wallet_id =  integration_wallet_id[0]
@@ -192,12 +166,13 @@ def disperse_funds(batch_id, account_id: str, df, currency: str, user_id: str, a
                 )
             sql_transaction += "COMMIT;"
             try:
-                client.sqlExec(sql_transaction)
+                execute_sql(sql_transaction, integration)
                 df.loc[group.index, "status_transaction"] = "SUCCESSFUL"
             except Exception as e:
                 logging.error(f"Error executing SQL transaction: {str(e)}")
                 df.loc[group.index, "status_transaction"] = "FAILED"
-        rollback_failed_transactions(client, df, wallet_id_from, percentage_fee)
+        df.loc[df['account_id'].isna(), 'status_transaction'] = "FAILED"
+        rollback_failed_transactions(integration, df, wallet_id_from, percentage_fee)
         return df
     except Exception as e:
         logging.error(f"Error dispersing funds: {str(e)}")
@@ -222,6 +197,43 @@ def save_excel_to_s3(df: pd.DataFrame, s3_key: str):
         logging.error(f"Error saving file to S3: {str(e)}")
         raise
 
+def create_accounts(df, currency, integration):
+
+    df_account_to_create = df[df['account_id'].isna()]
+    df_account_to_create['account_id'] = df_account_to_create['account_id'].apply(lambda x: uuid.uuid4())
+    df_account_to_create['wallet_id'] = df_account_to_create['wallet_id'].apply(lambda x: uuid.uuid4())
+    
+    groups = split_dataframe(df_account_to_create, group_size=100)
+    for group in groups:
+        sql_transaction = "BEGIN TRANSACTION;\n"
+        for index, row in group.iterrows():
+            account_id = row['account_id']
+            wallet_id = row['wallet_id']
+            user_name = row['user_name']
+            sql_transaction += (f"""
+                INSERT INTO {TABLE_ACCOUNTS} (id, user_name, business_url, typeAccount, currency_preference, created_at) 
+                VALUES ('{str(account_id)}', '{user_name}', '{user_name}.{integration}.is', 'personal', '{currency}', NOW());
+                INSERT INTO {TABLE_WALLETS} (id, wallet_name, account_id, currency, balance, created_at) 
+                VALUES ('{wallet_id}', '{currency}', '{str(account_id)}', '{currency}', 0, NOW());\n"""
+            )
+        sql_transaction += "COMMIT;"
+        try:
+            execute_sql(sql_transaction, integration)
+            df_account_to_create.loc[group.index, "create_account"] = "SUCCESSFUL"
+        except Exception as e:
+            df_account_to_create.loc[group.index, "create_account"] = "FAILED"
+            logging.error(f"Error executing SQL create accounts: {str(e)}")
+    
+    df_account_to_create = df_account_to_create[['user_name', 'account_id', 'wallet_id', 'create_account']]
+    df = df.merge(df_account_to_create, how='left', on='user_name', suffixes=('', '_new'))
+    df.loc[df['create_account'] == "FAILED", ['account_id', 'wallet_id']] = np.nan
+    df['account_id'] = df['account_id'].fillna(df['account_id_new'])
+    df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
+    
+    df = df[['user_name', 'account_id', 'wallet_id']].dropna(subset=['account_id', 'wallet_id'])
+
+    return df
+
 def process_message(message):
     body = json.loads(message["Body"])
     logging.info(f"Message received: {body}")
@@ -233,12 +245,15 @@ def process_message(message):
     amount_percentage = body.get("amount_percentage")
     user_percentage = body.get("user_percentage")
     process = body.get("user_percentage")
+    integration = body.get("integration")
     if not account_id or not s3_key:
         logging.error("Invalid message in queue. Skipping...")
         return False
     try:
         df = download_excel_from_s3(s3_key)
-        df = disperse_funds(batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
+        if any(df['account_id'].isna()):
+            df = create_accounts(df)
+        df = disperse_funds(integration, batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
         has_failures = "FAILED" in df["status_transaction"].values
