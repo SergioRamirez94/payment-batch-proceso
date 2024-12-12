@@ -10,6 +10,8 @@ import json
 import numpy as np
 from database.database import execute_sql, query_executer
 import numpy as np
+import requests
+import threading
 
 logging.basicConfig(level=logging.INFO)
 
@@ -26,7 +28,7 @@ TABLE_ACCOUNTS = os.getenv("TABLE_ACCOUNTS")
 TABLE_WALLETS = os.getenv("TABLE_WALLETS")
 TABLE_TRANSACTIONS = os.getenv("TABLE_TRANSACTIONS")
 PENDING_TRANSACTION = os.getenv("PENDING_TRANSACTION")
-
+URL_CREATE_USERS = os.getenv("PENDING_TRANSACTION")
 
 ID_ACCOUNT_BEU = os.getenv("ID_ACCOUNT_BEU")
 ID_ACCOUNT_TIKIN = os.getenv("ID_ACCOUNT_TIKIN")
@@ -39,6 +41,10 @@ DICT_ACCOUNT = {
 
 s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
+
+def async_request(data):
+    requests.post(URL_CREATE_USERS, data = data)
+
 
 def custom_serializer(obj):
     if isinstance(obj, (np.integer, np.floating)):
@@ -230,6 +236,15 @@ def create_accounts(df, currency, integration, s3_key):
     df['account_id'] = df['account_id'].fillna(df['account_id_new'])
     df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
     df = df[['user_name', 'account_id', 'wallet_id', 'amount']]
+
+    df_account_created =df_account_to_create[df_account_to_create['create_account'] == "SUCCESSFUL"]
+    df_account_created = df_account_created.rename(columns = {'user_name':'username'})
+    df_account_created["platform"] = integration
+    data = df_account_created[['username', "platform","account_id" ]].to_dict('records')
+    body = {"data": data}
+    t = threading.Thread(target=async_request, args=(body,))
+    t.start()
+
     save_excel_to_s3(df, s3_key)
     return 
 
