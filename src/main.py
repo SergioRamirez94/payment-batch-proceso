@@ -8,7 +8,7 @@ import os
 import uuid
 import json
 import numpy as np
-from .database.database import execute_sql, query_executer
+from database.database import execute_sql, query_executer
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -116,7 +116,6 @@ def disperse_funds(integration, batch_id, account_id: str, df, currency: str, us
         wallet_id_from, balance = response
         if 'status_transaction' in df_transactions.columns:
             df_transactions = df_transactions[df_transactions['status_transaction'] =='FAILED']
-
         total_amont = df_transactions['amount'].sum()
         if balance < total_amont:
             raise ValueError("Insufficient funds.")
@@ -124,14 +123,15 @@ def disperse_funds(integration, batch_id, account_id: str, df, currency: str, us
         percentage_fee = (user_percentage + amount_percentage)/100
         total_fee = total_amont*percentage_fee
         block_amount(integration, wallet_id_from, total_fee, batch_id)
+        
         groups = split_dataframe(df_transactions, group_size=100)
-        integration_wallet_id = get_wallet_intregration(integration, "tikin", currency)
+        integration_wallet_id = get_wallet_intregration(integration, currency)
         if integration_wallet_id is None:
             raise ValueError("Integration account no exist.")
         integration_wallet_id =  integration_wallet_id[0]
         for group in groups:
             sql_transaction = "BEGIN TRANSACTION;\n"
-            for index, row in group.iterrows():
+            for _, row in group.iterrows():
                 wallet_id = row['wallet_id']
                 amount = row['amount']
                 fee = amount*percentage_fee
@@ -197,13 +197,13 @@ def save_excel_to_s3(df: pd.DataFrame, s3_key: str):
         logging.error(f"Error saving file to S3: {str(e)}")
         raise
 
-def create_accounts(df, currency, integration):
+def create_accounts(df, currency, integration, s3_key):
 
     df_account_to_create = df[df['account_id'].isna()]
     df_account_to_create['account_id'] = df_account_to_create['account_id'].apply(lambda x: uuid.uuid4())
     df_account_to_create['wallet_id'] = df_account_to_create['wallet_id'].apply(lambda x: uuid.uuid4())
     
-    groups = split_dataframe(df_account_to_create, group_size=100)
+    groups = split_dataframe(df_account_to_create, group_size=300)
     for group in groups:
         sql_transaction = "BEGIN TRANSACTION;\n"
         for index, row in group.iterrows():
@@ -229,10 +229,9 @@ def create_accounts(df, currency, integration):
     df.loc[df['create_account'] == "FAILED", ['account_id', 'wallet_id']] = np.nan
     df['account_id'] = df['account_id'].fillna(df['account_id_new'])
     df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
-    
-    df = df[['user_name', 'account_id', 'wallet_id']].dropna(subset=['account_id', 'wallet_id'])
-
-    return df
+    df = df[['user_name', 'account_id', 'wallet_id', 'amount']]
+    save_excel_to_s3(df, s3_key)
+    return 
 
 def process_message(message):
     body = json.loads(message["Body"])
@@ -252,7 +251,7 @@ def process_message(message):
     try:
         df = download_excel_from_s3(s3_key)
         if any(df['account_id'].isna()):
-            df = create_accounts(df)
+            df = create_accounts(df, currency, integration, s3_key)
         df = disperse_funds(integration, batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
