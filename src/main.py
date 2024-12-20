@@ -242,8 +242,12 @@ def create_accounts(df, currency, integration, s3_key):
     df_account_created["platform"] = integration
     data = df_account_created[['username', "platform","account_id" ]].to_dict('records')
     body = {"data": data}
-    t = threading.Thread(target=async_request, args=(body,))
-    t.start()
+    try:
+        t = threading.Thread(target=async_request, args=(body,))
+        t.start()
+    except Exception as e:
+        logging.error(f"Error creating users: {str(e)}")
+        
 
     save_excel_to_s3(df, s3_key)
     return 
