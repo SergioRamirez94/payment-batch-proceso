@@ -104,7 +104,7 @@ def rollback_failed_transactions(integration, df, wallet_id_from, percentage_fee
     failed_transactions = df[df['status_transaction'] == "FAILED"]
     if not failed_transactions.empty:
         total_refund = failed_transactions['amount'].sum()
-        total_refund = percentage_fee*total_refund
+        total_refund = total_refund * percentage_fee + total_refund
         query = f"UPDATE wallets SET balance = balance + {total_refund} WHERE id = '{wallet_id_from}';"
         try:
             execute_sql(query, integration)
@@ -128,7 +128,7 @@ def disperse_funds(integration, batch_id, account_id: str, df, currency: str, us
             raise ValueError("Insufficient funds.")
         
         percentage_fee = (user_percentage + amount_percentage)/100
-        total_fee = total_amont*percentage_fee
+        total_fee = total_amont*percentage_fee + total_amont
         block_amount(integration, wallet_id_from, total_fee, batch_id)
         
         groups = split_dataframe(df_transactions, group_size=100)
