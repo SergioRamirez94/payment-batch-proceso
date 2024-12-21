@@ -43,8 +43,9 @@ s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
 
 def async_request(data):
-    requests.post(URL_CREATE_USERS, data = data)
-
+    response = requests.post(URL_CREATE_USERS, data = data)
+    if response.status_code != 200:
+        logging.error(f"Error creating users: {response.text}")
 
 def custom_serializer(obj):
     if isinstance(obj, (np.integer, np.floating)):
