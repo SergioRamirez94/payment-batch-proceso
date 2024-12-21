@@ -43,6 +43,7 @@ s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
 
 def async_request(data):
+    print(data)
     response = requests.post(URL_CREATE_USERS, data = data)
 
     logging.error(f"Response create user: {response.text}")
