@@ -263,7 +263,7 @@ def process_message(message):
     batch_id = body.get("batch_id")
     amount_percentage = body.get("amount_percentage")
     user_percentage = body.get("user_percentage")
-    process = body.get("user_percentage")
+    process = body.get("process")
     integration = body.get("integration")
     if not account_id or not s3_key:
         logging.error("Invalid message in queue. Skipping...")
