@@ -243,6 +243,8 @@ def create_accounts(df, currency, integration, s3_key):
     df_account_created =df_account_to_create[df_account_to_create['create_account'] == "SUCCESSFUL"]
     df_account_created = df_account_created.rename(columns = {'user_name':'username'})
     df_account_created["platform"] = integration
+    df_account_created["account_id"] = df_account_created["account_id"].apply(lambda x: str(x))
+    df_account_created["username"] = df_account_created["username"].apply(lambda x: str(x))
     data = df_account_created[['username', "platform","account_id" ]].to_dict('records')
     body = {"data": data}
     try:
