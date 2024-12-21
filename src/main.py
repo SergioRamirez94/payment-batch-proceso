@@ -123,6 +123,7 @@ def disperse_funds(integration, batch_id, account_id: str, df, currency: str, us
         if 'status_transaction' in df_transactions.columns:
             df_transactions = df_transactions[df_transactions['status_transaction'] =='FAILED']
         total_amont = df_transactions['amount'].sum()
+        print('total amount', total_amont)
         if balance < total_amont:
             raise ValueError("Insufficient funds.")
         
@@ -250,7 +251,7 @@ def create_accounts(df, currency, integration, s3_key):
         
 
     save_excel_to_s3(df, s3_key)
-    return 
+    return df
 
 def process_message(message):
     body = json.loads(message["Body"])
