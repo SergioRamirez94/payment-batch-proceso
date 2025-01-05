@@ -2,7 +2,6 @@ import boto3
 import logging
 import pandas as pd
 from typing import Any, Dict, Optional
-from immudb.client import ImmudbClient
 from io import BytesIO
 import os
 import uuid
@@ -12,6 +11,8 @@ from database.database import execute_sql, query_executer
 import numpy as np
 import requests
 import threading
+import coolname
+import random
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,6 +30,7 @@ TABLE_WALLETS = os.getenv("TABLE_WALLETS")
 TABLE_TRANSACTIONS = os.getenv("TABLE_TRANSACTIONS")
 PENDING_TRANSACTION = os.getenv("PENDING_TRANSACTION")
 URL_CREATE_USERS = os.getenv("URL_CREATE_USERS")
+SQS_RESQUEST_RELATION_ACCOUNTS =  os.getenv("SQS_RESQUEST_RELATION_ACCOUNTS")
 
 ID_ACCOUNT_BEU = os.getenv("ID_ACCOUNT_BEU")
 ID_ACCOUNT_TIKIN = os.getenv("ID_ACCOUNT_TIKIN")
@@ -41,6 +43,40 @@ DICT_ACCOUNT = {
 
 s3_client = boto3.client("s3")
 sqs_client = boto3.client("sqs")
+
+def suggest_account_name_endpoint(
+    user_name, 
+    integration,
+):
+    """
+    Endpoint para verificar si un user_name existe y sugerir un nombre alternativo si es necesario.
+    """
+    try:
+
+        query = f"SELECT user_name FROM {TABLE_ACCOUNTS} WHERE user_name = '{user_name}';"
+        result = query_executer(query, integration)
+
+        if not result:
+            return user_name
+
+        base_name = user_name
+        suggested_name = base_name
+        counter = 1
+
+        while True and counter < 1000:
+            random_number = random.randint(100, 999)
+            suggested_name = f"{base_name}{random_number}"
+            query = f"SELECT user_name FROM {TABLE_ACCOUNTS} WHERE user_name = '{suggested_name}';"
+            result = query_executer(query, integration)
+
+            if not result:
+                return suggested_name
+
+            counter += 1
+        return None
+    except Exception as e:
+        logging.error(f"Error suggesting account name: {str(e)}")
+        raise
 
 def async_request(data):
 
@@ -206,11 +242,19 @@ def save_excel_to_s3(df: pd.DataFrame, s3_key: str):
         logging.error(f"Error saving file to S3: {str(e)}")
         raise
 
+def create_user_name(integration):
+    user_name = coolname.generate_slug(2)
+    suggested_name = suggest_account_name_endpoint(user_name, integration)
+    if suggested_name is None:
+        raise ValueError("Error suggesting account name.")
+    return suggested_name
+
 def create_accounts(df, currency, integration, s3_key):
 
     df_account_to_create = df[df['account_id'].isna()]
     df_account_to_create['account_id'] = df_account_to_create['account_id'].apply(lambda x: uuid.uuid4())
     df_account_to_create['wallet_id'] = df_account_to_create['wallet_id'].apply(lambda x: uuid.uuid4())
+    df_account_to_create['user_name'] = df_account_to_create.apply(lambda x: create_user_name(integration), axis=1)
     
     groups = split_dataframe(df_account_to_create, group_size=300)
     for group in groups:
@@ -233,29 +277,70 @@ def create_accounts(df, currency, integration, s3_key):
             df_account_to_create.loc[group.index, "create_account"] = "FAILED"
             logging.error(f"Error executing SQL create accounts: {str(e)}")
     
-    df_account_to_create = df_account_to_create[['user_name', 'account_id', 'wallet_id', 'create_account']]
-    df = df.merge(df_account_to_create, how='left', on='user_name', suffixes=('', '_new'))
+    df_account_to_create = df_account_to_create[['identifier', 'account_id', 'wallet_id', 'create_account']]
+    df = df.merge(df_account_to_create, how='left', on='identifier', suffixes=('', '_new'))
     df.loc[df['create_account'] == "FAILED", ['account_id', 'wallet_id']] = np.nan
     df['account_id'] = df['account_id'].fillna(df['account_id_new'])
     df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
-    df = df[['user_name', 'account_id', 'wallet_id', 'amount']]
+    df = df[['identifier', 'account_id', 'wallet_id', 'amount']]
 
     df_account_created =df_account_to_create[df_account_to_create['create_account'] == "SUCCESSFUL"]
-    df_account_created = df_account_created.rename(columns = {'user_name':'username'})
     df_account_created["platform"] = integration
     df_account_created["account_id"] = df_account_created["account_id"].apply(lambda x: str(x))
-    df_account_created["username"] = df_account_created["username"].apply(lambda x: str(x))
-    data = df_account_created[['username', "platform","account_id" ]].to_dict('records')
+    df_account_created["identifier"] = df_account_created["identifier"].apply(lambda x: str(x))
+    data = df_account_created[['identifier', "platform","account_id" ]].to_dict('records')
     body = {"data": data}
     try:
-        t = threading.Thread(target=async_request, args=(body,))
-        t.start()
+        if SQS_RESQUEST_RELATION_ACCOUNTS:
+            t = threading.Thread(target=send_message_to_response_queue, args=(SQS_RESQUEST_RELATION_ACCOUNTS, body))
+            t.start()
+        else:
+            logging.error("Queue URL not set. Check environment variables.")
     except Exception as e:
-        logging.error(f"Error creating users: {str(e)}")
-        
+        logging.error(f"Error sending message to SQS: {str(e)}")
 
     save_excel_to_s3(df, s3_key)
     return df
+
+
+def create_wallets(df, currency, integration, s3_key):
+
+    df_wallet_to_create = df[(df['account_id'].notna())&(df['wallet_id'].isna())]
+    df_wallet_to_create['wallet_id'] = df_wallet_to_create['wallet_id'].apply(lambda x: uuid.uuid4())
+    
+    groups = split_dataframe(df_wallet_to_create, group_size=300)
+    
+    for group in groups:
+        sql_transaction = "BEGIN TRANSACTION;\n"
+        
+        for index, row in group.iterrows():
+            wallet_id = row['wallet_id']
+            account_id = row['account_id']
+            
+            sql_transaction += (f"""
+                INSERT INTO {TABLE_WALLETS} (id, wallet_name, account_id, currency, balance, created_at) 
+                VALUES ('{wallet_id}', '{currency}', '{str(account_id)}', '{currency}', 0, NOW());\n"""
+            )
+        
+        sql_transaction += "COMMIT;"
+        
+        try:
+            execute_sql(sql_transaction, integration)
+            df_wallet_to_create.loc[group.index, "create_wallet"] = "SUCCESSFUL"
+        except Exception as e:
+            df_wallet_to_create.loc[group.index, "create_wallet"] = "FAILED"
+            logging.error(f"Error executing SQL create wallets: {str(e)}")
+    
+    df_wallet_to_create = df_wallet_to_create[['identifier', 'account_id', 'wallet_id', 'create_wallet']]
+    df = df.merge(df_wallet_to_create, how='left', on='identifier', suffixes=('', '_new'))
+    df.loc[df['create_wallet'] == "FAILED", ['wallet_id']] = np.nan
+    df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
+    df = df[['identifier', 'account_id', 'wallet_id', 'amount']]
+
+    save_excel_to_s3(df, s3_key)
+    
+    return df
+
 
 def process_message(message):
     body = json.loads(message["Body"])
@@ -274,8 +359,18 @@ def process_message(message):
         return False
     try:
         df = download_excel_from_s3(s3_key)
+        if any(df['account_id'].isna()) and process=="bonuses":
+            response_message = {
+                "batch_id": batch_id,
+                "status": "FAILED",
+                "error": "The accounts need to be created."
+            }
+            send_message_to_response_queue(SQS_RESPONSE_BATCH_TRANSACTION, response_message)
+            return True
         if any(df['account_id'].isna()):
             df = create_accounts(df, currency, integration, s3_key)
+        if any(df['wallet_id'].isna()):
+            df = create_wallets(df, currency, integration, s3_key)
         df = disperse_funds(integration, batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
