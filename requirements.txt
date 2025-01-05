@@ -3,3 +3,4 @@ immudb-py
 pandas
 openpyxl
 boto3
+coolname
