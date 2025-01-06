@@ -351,7 +351,8 @@ def process_message(message):
         return False
     try:
         df = download_excel_from_s3(s3_key)
-        if any(df['account_id'].isna()) and process=="bonuses":
+        print(df)
+        if any(df['account_id'].isna()) and process=="treasury":
             response_message = {
                 "batch_id": batch_id,
                 "status": "FAILED",
@@ -394,10 +395,9 @@ def process_queue():
             response = sqs_client.receive_message(
                 QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
                 MaxNumberOfMessages=1,
-                WaitTimeSeconds=10
+                WaitTimeSeconds=1
             )
             if "Messages" not in response:
-                logging.info("No messages in the queue.")
                 continue
             for message in response["Messages"]:
                 result = process_message(message)
