@@ -256,8 +256,8 @@ def create_accounts(df, currency, integration, s3_key):
             wallet_id = row['wallet_id']
             user_name = row['user_name']
             sql_transaction += (f"""
-                INSERT INTO {TABLE_ACCOUNTS} (id, user_name, business_url, typeAccount, currency_preference, created_at, is_active, is_verify) 
-                VALUES ('{str(account_id)}', '{user_name}', '{user_name}.{integration}.is', 'personal', '{currency}', NOW(), true, false);
+                INSERT INTO {TABLE_ACCOUNTS} (id, user_name, business_url, typeAccount, currency_preference, created_at, is_active, is_verify, is_editable) 
+                VALUES ('{str(account_id)}', '{user_name}', '{user_name}.{integration}.is', 'personal', '{currency}', NOW(), true, false, true);
                 INSERT INTO {TABLE_WALLETS} (id, wallet_name, account_id, currency, balance, created_at) 
                 VALUES ('{wallet_id}', '{currency}', '{str(account_id)}', '{currency}', 0, NOW());\n"""
             )
