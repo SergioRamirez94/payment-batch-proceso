@@ -237,7 +237,7 @@ def save_excel_to_s3(df: pd.DataFrame, s3_key: str):
         raise
 
 def create_user_name(integration):
-    user_name = coolname.generate_slug(2)
+    user_name = f"${coolname.generate_slug(2)}"
     suggested_name = suggest_account_name_endpoint(user_name, integration)
     if suggested_name is None:
         raise ValueError("Error suggesting account name.")
@@ -259,7 +259,7 @@ def create_accounts(df, currency, integration, s3_key):
             user_name = row['user_name']
             sql_transaction += (f"""
                 INSERT INTO {TABLE_ACCOUNTS} (id, user_name, business_url, typeAccount, currency_preference, created_at, is_active, is_verify, is_editable) 
-                VALUES ('{str(account_id)}', '{user_name}', '{user_name}.{integration}.is', 'personal', '{currency}', NOW(), true, false, true);
+                VALUES ('{str(account_id)}', '{user_name}', 'https//{integration}.pro/{user_name}', 'personal', '{currency}', NOW(), true, false, true);
                 INSERT INTO {TABLE_WALLETS} (id, wallet_name, account_id, currency, balance, created_at) 
                 VALUES ('{wallet_id}', '{currency}', '{str(account_id)}', '{currency}', 0, NOW());\n"""
             )
