@@ -143,8 +143,10 @@ def rollback_failed_transactions(integration, df, wallet_id_from, percentage_fee
             logging.error(f"Error refunding funds: {str(e)}")
             raise
 
-def disperse_funds(integration, batch_id, account_id: str, df, currency: str, user_id: str, amount_percentage, user_percentage, process):
+def disperse_funds(integration, batch_id, account_id: str, df, currency: str, user_id: str, amount_percentage, user_percentage, process, concept):
     try:
+
+        concept = f"'{concept}'" if process == 'bonuses' else 'NULL'
         df_transactions = df[df['account_id'].notna()].copy()
         response = check_amount_account(integration, account_id, currency)
         if response is None:
@@ -182,11 +184,11 @@ def disperse_funds(integration, batch_id, account_id: str, df, currency: str, us
                             transaction_id, user_id, transaction_type, transaction_group, 
                             source_wallet_id, destination_wallet_id, currency, amount, 
                             fee_fixed, fee_variable_percent, exchange_rate, 
-                            related_transaction_id, status, timestamp_create
+                            related_transaction_id, status, timestamp_create, concept
                         ) VALUES (
                             '{uuid.uuid4()}', '{user_id}', 'transfer', '{process}', 
                             '{wallet_id_from}', '{wallet_id}', '{currency}', {amount}, 
-                            0.0, {percentage_fee*100}, NULL, '{batch_id}', 'completed', NOW()
+                            0.0, {percentage_fee*100}, NULL, '{batch_id}', 'completed', NOW(), {concept}
                         );\n"""
                 )
                 sql_transaction += (
@@ -346,6 +348,7 @@ def process_message(message):
     user_percentage = body.get("user_percentage")
     process = body.get("process")
     integration = body.get("integration")
+    concept = body.get("concept")
     if not account_id or not s3_key:
         logging.error("Invalid message in queue. Skipping...")
         return False
@@ -364,7 +367,7 @@ def process_message(message):
             df = create_accounts(df, currency, integration, s3_key)
         if any(df['wallet_id'].isna()):
             df = create_wallets(df, currency, integration, s3_key)
-        df = disperse_funds(integration, batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process)
+        df = disperse_funds(integration, batch_id, account_id, df, currency, user_id, amount_percentage, user_percentage, process, concept)
         output_key = f"results/{batch_id}_results.xlsx"
         save_excel_to_s3(df, output_key)
         has_failures = "FAILED" in df["status_transaction"].values
