@@ -91,25 +91,25 @@ def process_message(message):
 
 
 def process_queue():
-    # try:
-    while True:
-        response = sqs_client.receive_message(
-            QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
-            MaxNumberOfMessages=1,
-            WaitTimeSeconds=1,
-        )
-        if "Messages" not in response:
-            continue
-        for message in response["Messages"]:
-            result = process_message(message)
-            if result:
-                sqs_client.delete_message(
-                    QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
-                    ReceiptHandle=message["ReceiptHandle"],
-                )
-            logging.info("Message processed and removed from the queue.")
-    # except Exception as e:
-    #   logging.error(f"General error while processing the queue: {str(e)}")
+    try:
+        while True:
+            response = sqs_client.receive_message(
+                QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=1,
+            )
+            if "Messages" not in response:
+                continue
+            for message in response["Messages"]:
+                result = process_message(message)
+                if result:
+                    sqs_client.delete_message(
+                        QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
+                        ReceiptHandle=message["ReceiptHandle"],
+                    )
+                logging.info("Message processed and removed from the queue.")
+    except Exception as e:
+       logging.error(f"General error while processing the queue: {str(e)}")
 
 
 if __name__ == "__main__":
