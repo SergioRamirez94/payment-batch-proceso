@@ -9,6 +9,8 @@ import logging
 from decimal import Decimal
 from typing import List
 import os
+from exceptions.insufficient_funds_error import InsufficientFundsError
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 
@@ -31,6 +33,7 @@ def get_wallets_by_ids(db_session:Session, wallets_id) ->List[Wallet]:
 def get_wallet_by_account_id(db_session:Session, account_id, currency:Currency) ->Wallet:
     return db_session.query(Wallet).filter(Wallet.account_account_id==account_id, Wallet.currency_currency_id == currency.currency_id).first()
 
+
 def create_wallets(group: pd.DataFrame, currency:Currency):
     list_wallets = []
     for _, row in group.iterrows():
@@ -38,7 +41,7 @@ def create_wallets(group: pd.DataFrame, currency:Currency):
             Wallet(
                 wallet_id = row['wallet_id'],
                 wallet_name = currency.iso_code,
-                currency = currency,
+                currency_currency_id = currency.currency_id,
                 balance = 0.0,
                 account_account_id = row['account_id']
             )
@@ -54,8 +57,10 @@ def create_wallets_batch(db_session:Session, df: pd.DataFrame, currency:Currency
 
     for group in groups:
         try:
+            
             list_wallets =  create_wallets(group, currency)
             db_session.add_all(list_wallets)
+            db_session.commit()
             df_wallet_to_create.loc[group.index, "create_wallet"] = "SUCCESSFUL"
         except SQLAlchemyError as e:
             db_session.rollback()
@@ -66,19 +71,19 @@ def create_wallets_batch(db_session:Session, df: pd.DataFrame, currency:Currency
     df = df.merge(df_wallet_to_create, how='left', on='identifier', suffixes=('', '_new'))
     df.loc[df['create_wallet'] == "FAILED", ['wallet_id']] = np.nan
     df['wallet_id'] = df['wallet_id'].fillna(df['wallet_id_new'])
-    df = df[['identifier', 'account_id', 'wallet_id', 'amount']]
-    
+    df = df[['identifier', 'account_id', 'wallet_id', 'amount', 'amount_fee']]
     return df
 
+
 def get_integration_wallet_or_create(db_session:Session, tenant:Tenant, currency:Currency):
-    account_tenant_id = DICT_ACCOUNT[tenant.name()]
+    account_tenant_id = DICT_ACCOUNT[tenant.name]
     return get_wallet_by_account_id(db_session, account_tenant_id, currency)
 
 
    
 def validate_funds(wallet, amount):
-    #TODO tirar error
-    return wallet.balance > amount
+    if wallet.balance < amount:
+        raise InsufficientFundsError(wallet.balance, amount)
 
 
 def add_funds_to_wallet(wallet: Wallet, amount: float) -> Wallet:

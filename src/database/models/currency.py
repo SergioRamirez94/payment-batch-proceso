@@ -10,3 +10,4 @@ class Currency(Base):
     name = Column(String, nullable=False)
     iso_code = Column(String, nullable=False)
     wallets = relationship("Wallet", back_populates="currency")
+    country = relationship("Country", back_populates="currency")
