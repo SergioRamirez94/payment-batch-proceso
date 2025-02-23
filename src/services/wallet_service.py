@@ -25,6 +25,7 @@ DICT_ACCOUNT = {
 }
 
 
+
 def get_wallets_by_ids(db_session:Session, wallets_id) ->List[Wallet]:
     wallets =  db_session.query(Wallet).filter(Wallet.wallet_id.in_(wallets_id)).all()
     return wallets
