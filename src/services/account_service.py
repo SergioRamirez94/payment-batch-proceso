@@ -93,5 +93,6 @@ def create_accounts_batch(db_session:Session, df: pd.DataFrame, currency:Currenc
     data = df_account_created[['identifier', "platform","account_id" ]].to_dict('records')
     body = {"data": data}
     send_notification_create_account(body)
+    
     return df
     
