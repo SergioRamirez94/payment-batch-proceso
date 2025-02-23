@@ -46,7 +46,7 @@ class TransactionMaker:
 
 
     def get_amount_to_transfer(self, wallet_id):
-        return Decimal(str(round(self.df[self.df["wallet_id"] == str(wallet_id)]["amount"].values[0],2)))
+        return Decimal(str(round(self.df[self.df["wallet_id"].astype(str) == str(wallet_id)]["amount"].values[0],2)))
 
 
     def create_transaction(self, sub_group):
