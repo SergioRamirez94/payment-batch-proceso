@@ -96,7 +96,7 @@ def process_queue():
             response = sqs_client.receive_message(
                 QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
                 MaxNumberOfMessages=1,
-                WaitTimeSeconds=60,
+                WaitTimeSeconds=20,
             )
             if "Messages" not in response:
                 continue
