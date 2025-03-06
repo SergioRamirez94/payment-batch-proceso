@@ -26,7 +26,11 @@ class TransactionMaker:
                 tenant):
         self.db_session = db_session
         self.df = df
-        self.transaction_type = TransactionType.transfer
+        self.transaction_type = (
+            TransactionType.bonus
+            if message_data.process == "bonuses"
+            else TransactionType.transfer
+        )
         self.transaction_group = (
             TransactionGroup.bonus
             if message_data.process == "bonuses"
