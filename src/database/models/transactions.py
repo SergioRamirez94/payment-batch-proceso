@@ -12,7 +12,7 @@ class  TransactionType(Enum):
     transfer = "transfer"
     add_funds = "add_funds"
     fee_transfer = "fee_transfer"
-    individual_bonus=  "individual_bonus"
+    bonus =  "bonus"
 
 class  TransactionGroup(Enum):
     bonus= "bonus"
