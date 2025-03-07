@@ -1,5 +1,7 @@
 requests==2.31.0
-immudb-py
 pandas
 openpyxl
 boto3
+coolname
+SQLAlchemy==2.0.21
+psycopg2-binary
