@@ -1,5 +1,3 @@
-
-
 class InsufficientFundsError(Exception):
     def __init__(self, available_amount, required_amount):
         self.available_amount = available_amount
