@@ -87,7 +87,7 @@ def process_message(message):
         response_message = {
             "batch_id": message_data.batch_id,
             "status": "FAILED",
-            "error":e
+            "error":str(e)
         }
         send_notification_finish_transactions(response_message)
 
