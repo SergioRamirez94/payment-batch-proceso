@@ -13,7 +13,6 @@ from services.transaction_service import TransactionMaker
 from database.models.accounts import Tenant
 from database.database import SesionLocalWallet
 from utils.bucket_management import save_excel_to_s3
-from exceptions.insufficient_funds_error import InsufficientFundsError
 from utils.sqs_notification import send_notification_finish_transactions
 
 sqs_client = boto3.client("sqs")
@@ -84,7 +83,6 @@ def process_message(message):
             "total_accounts_transfer":total_accounts_transfer
         }
         send_notification_finish_transactions(response_message)
-        return True
     except Exception as e:
         response_message = {
             "batch_id": message_data.batch_id,
@@ -92,7 +90,6 @@ def process_message(message):
             "error":e
         }
         send_notification_finish_transactions(response_message)
-        return True
 
 
 def process_queue():
@@ -106,12 +103,11 @@ def process_queue():
             if "Messages" not in response:
                 continue
             for message in response["Messages"]:
-                result = process_message(message)
-                if result:
-                    sqs_client.delete_message(
-                        QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
-                        ReceiptHandle=message["ReceiptHandle"],
-                    )
+                process_message(message)
+                sqs_client.delete_message(
+                    QueueUrl=SQS_REQUEST_BATCH_TRANSACTION,
+                    ReceiptHandle=message["ReceiptHandle"],
+                )
                 logging.info("Message processed and removed from the queue.")
     except Exception as e:
        logging.error(f"General error while processing the queue: {str(e)}")
