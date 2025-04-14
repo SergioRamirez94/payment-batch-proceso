@@ -86,7 +86,12 @@ def process_message(message):
         send_notification_finish_transactions(response_message)
         return True
     except Exception as e:
-
+        response_message = {
+            "batch_id": message_data.batch_id,
+            "status": "FAILED",
+            "error":e
+        }
+        send_notification_finish_transactions(response_message)
         return True
 
 
