@@ -12,7 +12,7 @@ from typing import List
 
 logging.basicConfig(level=logging.INFO)
 
-GROUP_SIZE = 300
+GROUP_SIZE = 500
 
 
 class TransactionMaker:
