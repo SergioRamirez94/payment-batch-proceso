@@ -65,13 +65,26 @@ flowchart TD
 flowchart TD
     Start((Start))
     Download[download_excel_from_s3]
-    Accounts[create_accounts_batch]
-    Wallets[create_wallets_batch]
+    CheckAccounts{missing account_id?}
+    CreateAcc[create_accounts_batch]
+    CheckWallets{missing wallet_id?}
+    CreateWal[create_wallets_batch]
+    GetBalance[get_wallet_balance]
     Tx[TransactionMaker.excute]
+    Rollback{any FAILED?}
+    Roll[TransactionMaker.rollback_money]
     Save[save_excel_to_s3]
     Notify[send_notification_finish_transactions]
     End((End))
 
-    Start --> Download --> Accounts --> Wallets --> Tx --> Save --> Notify --> End
+    Start --> Download --> CheckAccounts
+    CheckAccounts -- "yes" --> CreateAcc --> CheckWallets
+    CheckAccounts -- "no" --> CheckWallets
+    CheckWallets -- "yes" --> CreateWal --> GetBalance
+    CheckWallets -- "no" --> GetBalance
+    GetBalance --> Tx --> Rollback
+    Rollback -- "yes" --> Roll --> Save
+    Rollback -- "no" --> Save
+    Save --> Notify --> End
 ```
 </details>
