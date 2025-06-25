@@ -4,6 +4,7 @@ import pandas as pd
 import uuid
 
 from services.account_service import create_accounts, suggest_name, create_account_name, create_accounts_batch
+from sqlalchemy.exc import SQLAlchemyError
 from database.models.accounts import Account, Tenant
 from database.models.currency import Currency
 from database.models.country import Country
@@ -74,6 +75,27 @@ class TestAccountCreator(unittest.TestCase):
         self.assertIn("account_id", df_result.columns)
         self.assertIn("wallet_id", df_result.columns)
         self.assertTrue(mock_notify.called)
+
+    @patch("services.account_service.suggest_name", return_value=None)
+    @patch("services.account_service.coolname.generate_slug", return_value="slug")
+    def test_create_account_name_failure(self, mock_slug, mock_suggest):
+        mock_session = MagicMock()
+        with self.assertRaises(ValueError):
+            create_account_name(mock_session, self.tenant)
+
+    @patch("services.account_service.create_wallets")
+    @patch("services.account_service.send_notification_create_account")
+    @patch("services.account_service.create_account_name")
+    def test_create_accounts_batch_failure(self, mock_name, mock_notify, mock_wallets):
+        mock_name.return_value = "user_test"
+        mock_wallets.return_value = [MagicMock()]
+        mock_session = MagicMock()
+        mock_session.commit.side_effect = SQLAlchemyError("db error")
+        mock_session.rollback = MagicMock()
+
+        create_accounts_batch(mock_session, self.df.copy(), self.currency, self.tenant)
+
+        self.assertTrue(mock_session.rollback.called)
 
 
 if __name__ == '__main__':
