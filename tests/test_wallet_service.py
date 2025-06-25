@@ -8,13 +8,18 @@ from services.wallet_service import (
     get_wallet_by_account_id,
     create_wallets,
     create_wallets_batch,
-    get_integration_wallet_or_create
+    get_integration_wallet_or_create,
+    validate_funds,
+    add_funds_to_wallet,
+    subtract_funds_from_wallet
 )
 
 from database.models.wallets import Wallet
 from database.models.currency import Currency
 from database.models.accounts import Tenant
 from database.models.country import Country
+from sqlalchemy.exc import SQLAlchemyError
+from exceptions.insufficient_funds_error import InsufficientFundsError
 
 
 class TestWalletService(unittest.TestCase):
@@ -80,6 +85,28 @@ class TestWalletService(unittest.TestCase):
 
         wallet = get_integration_wallet_or_create(mock_session, self.tenant, self.currency)
         self.assertEqual(wallet, mock_wallet)
+
+    @patch("services.wallet_service.uuid.uuid4", return_value=uuid.UUID("87654321-4321-6789-4321-678987654321"))
+    def test_create_wallets_batch_failure(self, mock_uuid):
+        mock_session = MagicMock()
+        mock_session.commit.side_effect = SQLAlchemyError("db error")
+        mock_session.rollback = MagicMock()
+
+        create_wallets_batch(mock_session, self.df.copy(), self.currency)
+
+        self.assertTrue(mock_session.rollback.called)
+
+    def test_validate_funds_insufficient(self):
+        wallet = MagicMock(balance=10)
+        with self.assertRaises(InsufficientFundsError):
+            validate_funds(wallet, 20)
+
+    def test_add_and_subtract_funds_wallet(self):
+        wallet = MagicMock(balance=10)
+        wallet = add_funds_to_wallet(wallet, 5)
+        self.assertEqual(wallet.balance, 15)
+        wallet = subtract_funds_from_wallet(wallet, 3)
+        self.assertEqual(wallet.balance, 12)
 
 
 if __name__ == "__main__":
